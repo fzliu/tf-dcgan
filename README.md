@@ -39,7 +39,7 @@ python dcgan.py -h
 
 ## Samples
 
-All of the images below are artificial creations from the generator network, i.e. the "celebrities" shown below are actual people.
+All of the images below are artificial creations from the generator network, i.e. the "celebrities" shown below are not actual people.
 
 Celebrities - 64x64 generations on [CelebA](http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html) (resized such that the smaller dimension is 112, followed by a center crop):
 
