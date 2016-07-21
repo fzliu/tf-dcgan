@@ -58,22 +58,22 @@ def conv2d(name, bottom, shape, strides, top_shape=None, with_bn=True, is_train=
 
     with tf.variable_scope(name) as scope:
         
-        # apply batch normalization, if necessary
-        bn = _bn(bottom, is_train) if with_bn else bottom
-
         # add convolution op
         weights = tf.get_variable("weights", shape=shape,
                                   initializer=tf.truncated_normal_initializer(stddev=0.02))
         if top_shape is not None:
-            conv = tf.nn.conv2d_transpose(bn, weights, top_shape, strides, padding="SAME")
+            conv = tf.nn.conv2d_transpose(bottom, weights, top_shape, strides, padding="SAME")
         else:
-            conv = tf.nn.conv2d(bn, weights, strides, padding="SAME")
+            conv = tf.nn.conv2d(bottom, weights, strides, "SAME")
 
-        # add biases
-        bias_shape = [shape[-1]] if top_shape is None else [shape[-2]]
-        biases = tf.get_variable("biases", shape=bias_shape,
-                                 initializer=tf.constant_initializer())
-        top = tf.nn.bias_add(conv, biases)
+        # apply batch normalization, if necessary
+        if with_bn:
+            top = _bn(conv, is_train)
+        else:
+            bias_shape = [shape[-1]] if top_shape is None else [shape[-2]]
+            biases = tf.get_variable("biases", shape=bias_shape,
+                                     initializer=tf.constant_initializer())
+            top = tf.nn.bias_add(conv, biases)
 
     return top
 
@@ -85,35 +85,34 @@ def linear(name, bottom, shape, with_bn=True, is_train=None):
 
     with tf.variable_scope(name) as scope:
 
-        # apply batch normalization, if necessary
-        bn = _bn(bottom, is_train) if with_bn else bottom
-
         # inner product
         weights = tf.get_variable("weights", shape=shape,
                                   initializer=tf.truncated_normal_initializer(stddev=0.02))
-        linear = tf.matmul(bn, weights)
+        linear = tf.matmul(bottom, weights)
 
         # add biases
-        bias_shape = [shape[-1]]
-        biases = tf.get_variable("biases", shape=bias_shape,
-                                 initializer=tf.constant_initializer())
-        top = tf.nn.bias_add(linear, biases)
+        if with_bn:
+            top = _bn(linear, is_train)
+        else:
+            bias_shape = [shape[-1]]
+            biases = tf.get_variable("biases", shape=bias_shape,
+                                     initializer=tf.constant_initializer())
+            top = tf.nn.bias_add(linear, biases)
 
     return top
 
 
+def lrelu(bottom):
+    """
+        Activates the input tensor with leaky ReLU.
+    """
+
+    return tf.maximum(0.2 * bottom, bottom)
+
+
 def generator(data, is_train, side_length):
     """
-        Builds the generator model.
-
-        :param tensorflow.Tensor data:
-            A 4-D input tensor with the last dimension Gaussian sampled.
-
-        :param tensorflow.Tensor is_train:
-            Determines whether or not the generator is used only for inference.
-
-        :param int side_length:
-            Image side length.
+        Builds the original generator network.
     """
 
     assert side_length % 16 == 0, "image side length must be divisible by 16"
@@ -121,69 +120,57 @@ def generator(data, is_train, side_length):
     dim = side_length / 16
     (batch_size, z_len) = data.get_shape().as_list()
 
-    # project block, 1024 outputs
-    proj = tf.nn.relu(linear("g_proj", data, [z_len, dim * dim * 1024], with_bn=False))
-    rshp = tf.reshape(proj, [batch_size, dim, dim, 1024])
+    # linear project (and rseshape) block, 1024 outputs
+    proj = tf.reshape(tf.nn.relu(linear("g_proj", data, [z_len, dim * dim * 1024], 
+                      is_train=is_train)), [batch_size, dim, dim, 1024])
 
     # conv1 block, 512 outputs
     dim *= 2
-    conv1 = tf.nn.relu(conv2d("g_conv1", rshp, [5, 5, 512, 1024], STRIDE_2,
-                              top_shape=[batch_size, dim, dim, 512], is_train=is_train))
+    conv1 = tf.nn.relu(conv2d("g_conv1", proj, [5, 5, 512, 1024], STRIDE_2,
+                            top_shape=[batch_size, dim, dim, 512], is_train=is_train))
 
     # conv2 block, 256 outputs
     dim *= 2
     conv2 = tf.nn.relu(conv2d("g_conv2", conv1, [5, 5, 256, 512], STRIDE_2,
-                              top_shape=[batch_size, dim, dim, 256], is_train=is_train))
+                            top_shape=[batch_size, dim, dim, 256], is_train=is_train))
 
     # conv3 block, 128 outputs
     dim *= 2
     conv3 = tf.nn.relu(conv2d("g_conv3", conv2, [5, 5, 128, 256], STRIDE_2,
-                              top_shape=[batch_size, dim, dim, 128], is_train=is_train))
+                            top_shape=[batch_size, dim, dim, 128], is_train=is_train))
 
-    # conv4 block, 64 outputs
+    # conv4 block, 3 outputs
     dim *= 2
-    conv4 = tf.nn.relu(conv2d("g_conv4", conv3, [5, 5, 64, 128], STRIDE_2,
-                              top_shape=[batch_size, dim, dim, 64], is_train=is_train))
+    conv4 = tf.nn.tanh(conv2d("g_conv4", conv3, [5, 5, 3, 128], STRIDE_2,
+                            top_shape=[batch_size, dim, dim, 3], with_bn=False))
 
-    # conv5 block, 3 outputs
-    conv5 = tf.nn.tanh(conv2d("g_conv5", conv4, [3, 3, 3, 64], STRIDE_1,
-                              top_shape=[batch_size, dim, dim, 3], is_train=is_train))
-
-    top = conv5
+    top = conv4
 
     return top
 
 
 def discriminator(data, is_train):
     """
-        Builds the discriminator network.
-
-        :param tensorflow.Tensor data:
-            A 4-D tensor representing an input image.
-
-        :param tensorflow.Tensor is_train:
-            Determines whether or not the discriminator is used only for inference.
+        Builds the original discriminator network.
     """
 
     # conv1 block, 128 outputs
-    conv1 = tf.nn.relu(conv2d("d_conv1", data, [5, 5, 3, 128], STRIDE_2, with_bn=False))
+    conv1 = lrelu(conv2d("d_conv1", data, [5, 5, 3, 128], STRIDE_2, with_bn=False))
 
     # conv2 block, 256 outputs
-    conv2 = tf.nn.relu(conv2d("d_conv2", conv1, [5, 5, 128, 256], STRIDE_2, is_train=is_train))
+    conv2 = lrelu(conv2d("d_conv2", conv1, [5, 5, 128, 256], STRIDE_2, is_train=is_train))
 
     # conv3 block, 512 outputs
-    conv3 = tf.nn.relu(conv2d("d_conv3", conv2, [5, 5, 256, 512], STRIDE_2, is_train=is_train))
+    conv3 = lrelu(conv2d("d_conv3", conv2, [5, 5, 256, 512], STRIDE_2, is_train=is_train))
 
     # conv4 block, 1024 outputs
-    conv4 = tf.nn.relu(conv2d("d_conv4", conv3, [5, 5, 512, 1024], STRIDE_2, is_train=is_train))
-
-    # average pooling
-    avg_pool = tf.reduce_mean(conv4, [1, 2])
+    conv4 = lrelu(conv2d("d_conv4", conv3, [5, 5, 512, 1024], STRIDE_2, is_train=is_train))
 
     # fully connected
-    classifier = linear("d_classifier", avg_pool, [1024, 1], with_bn=False)
+    shape = conv4.get_shape().as_list()
+    classifier = linear("d_classifier", tf.reshape(conv4, [shape[0], -1]), 
+                        [shape[1] * shape[2] * shape[3], 1], with_bn=False)
 
     top = classifier
 
     return top
-
