@@ -1,4 +1,4 @@
-# dcgan
+# tf-dcgan
 
 ## Introduction
 
@@ -44,13 +44,13 @@ All of the images below are artificial creations from the generator network, i.e
 Celebrities - 64x64 generations on [CelebA](http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html) (resized such that the smaller dimension is 112, followed by a center crop):
 
 <p align="center">
-<img src="https://raw.githubusercontent.com/fzliu/dcgan/master/images/celeba.jpg" width="50%"/>
+<img src="https://raw.githubusercontent.com/fzliu/tf-dcgan/master/images/celeba.jpg" width="50%"/>
 </p>
 
 Small, canonical images - 64x64 generations on [CIFAR-10](https://www.cs.toronto.edu/~kriz/cifar.html):
 
 <p align="center">
-<img src="https://raw.githubusercontent.com/fzliu/dcgan/master/images/cifar-10.jpg" width="50%"/>
+<img src="https://raw.githubusercontent.com/fzliu/tf-dcgan/master/images/cifar-10.jpg" width="50%"/>
 </p>
 
 More sample generations on some custom datasets will follow. I'm also planning on training larger outputs (128x128) on larger datasets such as YFCC100M.
